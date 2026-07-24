@@ -44,6 +44,8 @@
 
 namespace cuda::experimental::__detail::__hss_sort
 {
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
+
 //! @brief Drive the complete multi-GPU HSS sort across all communicators.
 //!
 //! Top-level entry point that sequences the histogram-sort-with-sampling phases. Implements
@@ -122,6 +124,8 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__execute(
 
   __rebalance_to_original_counts(__setup, __comms, __envs, __local_inputs);
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental::__detail::__hss_sort
 
 // NOLINTEND(bugprone-reserved-identifier)

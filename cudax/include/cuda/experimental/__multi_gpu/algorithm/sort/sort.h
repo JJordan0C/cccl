@@ -41,6 +41,8 @@
 
 namespace cuda::experimental
 {
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
+
 _CCCL_TEMPLATE(
   class _Policy, class _CommRange, class _EnvRange, class _InputRange, class _BinaryOp = ::cuda::std::less<>)
 _CCCL_REQUIRES(__range_of_communicators<_CommRange> _CCCL_AND ::cuda::std::ranges::forward_range<_EnvRange>
@@ -57,16 +59,16 @@ void sort(const __result_policy_base<_Policy>& __policy,
   // that get_stream_t is a normal CPO and normally callable.
   static_assert(::cuda::std::__is_callable_v<::cuda::get_stream_t, _Env>, "Environment must contain a stream");
 
-  _CCCL_NVTX_RANGE_SCOPE("cuda::experimental::sort");
-
-  using _Tp =
-    ::cuda::std::ranges::range_value_t<::cuda::std::remove_cvref_t<::cuda::std::ranges::range_reference_t<_InputRange>>>;
-
   if (::cuda::std::ranges::size(__comms) == 0)
   {
     // We have no inputs, so... nothing to do
     return;
   }
+
+  _CCCL_NVTX_RANGE_SCOPE("cuda::experimental::sort");
+
+  using _Tp =
+    ::cuda::std::ranges::range_value_t<::cuda::std::remove_cvref_t<::cuda::std::ranges::range_reference_t<_InputRange>>>;
 
   ::cuda::experimental::__detail::__hss_sort::_HSSSorter<_Tp, _Env, _BinaryOp>::__execute(
     __policy,
@@ -75,6 +77,8 @@ void sort(const __result_policy_base<_Policy>& __policy,
     ::cuda::std::forward<_InputRange>(__range_of_input_ranges),
     ::cuda::std::move(__cmp));
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental
 
 // NOLINTEND(bugprone-reserved-identifier)

@@ -69,6 +69,8 @@
 
 namespace cuda::experimental::__detail::__hss_sort
 {
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
+
 //! @brief Single-thread kernel that draws sample keys from the union of splitter intervals.
 //!
 //! Runs on exactly one grid thread (all others return immediately). It walks the per-splitter
@@ -150,6 +152,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__sample_probes(
   _InputRange&& __input,
   const __buffer_type<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>>& __I_j,
   double __sampling_probability,
+  ::cuda::std::uint64_t __sample_seed,
   const _BinaryOp& __cmp,
   __buffer_type<_Tp>* __samples,
   __buffer_type<::cuda::std::size_t>* __sample_size)
@@ -158,13 +161,15 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__sample_probes(
     ::cuda::make_config(::cuda::make_hierarchy(::cuda::block_dims<1>(), ::cuda::grid_dims<1>()));
 
   _CCCL_VERIFY(__sampling_probability > 0, "Cannot have 0 probably of picking elements");
+  _CCCL_VERIFY(__sampling_probability <= 1., "Cannot have >1 probably of picking elements");
 
   ::cuda::launch(
     // All inputs should be on the same stream here
     __I_j.__get().stream(),
     __config,
-    __sample_probes_kernel<::cuda::std::remove_cvref_t<decltype(__config)>, _Tp, _BinaryOp>,
-    ::cuda::std::philox4x64{static_cast<::cuda::std::uint32_t>(__sampling_probability)},
+    ::cuda::experimental::__detail::__hss_sort::
+      __sample_probes_kernel<::cuda::std::remove_cvref_t<decltype(__config)>, _Tp, _BinaryOp>,
+    ::cuda::std::philox4x64{__sample_seed},
     __sampling_probability,
     ::cuda::std::to_address(::cuda::std::ranges::begin(__input)),
     ::cuda::std::to_address(::cuda::std::ranges::end(__input)),
@@ -173,6 +178,8 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__sample_probes(
     ::cuda::std::span<_Tp>{*__samples},
     __sample_size->__get().data());
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 
 //! @brief Interval-narrowing functor that tightens one splitter's `[L, U]` rank bracket.
 //!
@@ -195,7 +202,7 @@ struct __update_intervals_fn
   const ::cuda::std::uint64_t* __hist_begin;
   ::cuda::std::size_t __num_probes;
 
-  [[nodiscard]] _CCCL_DEVICE constexpr ::cuda::std::
+  [[nodiscard]] _CCCL_DEVICE_API constexpr ::cuda::std::
     tuple<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>, _Bracket<_Tp>, _Bracket<_Tp>>
     operator()(::cuda::std::uint64_t __target, _Bracket<_Tp> __L_i, _Bracket<_Tp> __U_i) const noexcept
   {
@@ -232,6 +239,8 @@ struct __update_intervals_fn
 
 // Rank designated as the collective root for the HSS sampling phase.
 inline constexpr ::cuda::std::int32_t __ROOT_RANK = 0;
+
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
 
 template <class _Tp, class _Env, class _BinaryOp>
 template <class _CommRange, class _EnvRange>
@@ -648,6 +657,8 @@ _HSSSorter<_Tp, _Env, _BinaryOp>::__histogramming_phase(
   ::std::vector<::cuda::std::size_t> __root_displs;
   ::cuda::std::optional<__buffer_type<_Tp>> __root_all_samples;
 
+  constexpr double __eps = 0.02; // 2% tolerance
+
   // Note: K is small, on the order of ~1-10
   const auto __K = ::cuda::std::max(
     static_cast<::cuda::std::int32_t>(::cuda::std::ceil(::cuda::std::log10(::cuda::std::log10(__comm_size) / __eps))),
@@ -659,8 +670,8 @@ _HSSSorter<_Tp, _Env, _BinaryOp>::__histogramming_phase(
     const auto __s_j  = ::cuda::std::pow(__s_j_interior, static_cast<double>(__j) / static_cast<double>(__K));
     const auto __prob = ::cuda::std::min(__s_j * static_cast<double>(__comm_size) / static_cast<double>(__N), 1.);
 
-    for (auto&& [__input, __scratch, __n_local] :
-         ::cuda::std::ranges::views::zip(__local_inputs, __local_scratch, __setup.__local_original_sizes))
+    for (auto&& [__comm, __input, __scratch, __n_local] :
+         ::cuda::std::ranges::views::zip(__comms, __local_inputs, __local_scratch, __setup.__local_original_sizes))
     {
       // Each iteration we sample the union of splitter intervals, \gamma_j with a probability
       // of __prob. For the first iteration, \gamma_j is the entire array, but for previous
@@ -677,9 +688,12 @@ _HSSSorter<_Tp, _Env, _BinaryOp>::__histogramming_phase(
         __j == 1 ? static_cast<::cuda::std::size_t>(::cuda::std::ceil(__n_local * __prob))
                  : __scratch.__sample_sendcount,
         ::cuda::std::size_t{1});
+      // 0x129381294235245ULL chosen randomly, by random dice roll
+      const auto __seed = (static_cast<::cuda::std::uint64_t>(__j) * 0x129381294235245ULL)
+                        ^ static_cast<::cuda::std::uint64_t>(__comm.rank());
 
       ::cuda::experimental::__detail::__hss_sort::__resize_for_overwrite(__scratch.__samples, __estimate);
-      __sample_probes(__input, __scratch.__I_j, __prob, __cmp, &__scratch.__samples, &__scratch.__samples_size);
+      __sample_probes(__input, __scratch.__I_j, __prob, __seed, __cmp, &__scratch.__samples, &__scratch.__samples_size);
     }
 
     __gather_merge_broadcast(
@@ -700,6 +714,8 @@ _HSSSorter<_Tp, _Env, _BinaryOp>::__histogramming_phase(
 
   return __local_splitters;
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental::__detail::__hss_sort
 
 // NOLINTEND(bugprone-reserved-identifier)

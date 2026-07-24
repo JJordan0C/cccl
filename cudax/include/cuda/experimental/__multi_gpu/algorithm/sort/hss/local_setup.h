@@ -43,6 +43,8 @@
 
 namespace cuda::experimental::__detail::__hss_sort
 {
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
+
 //! @brief Measure the per-rank sizes, desired offsets, and global key count for the sort.
 //!
 //! Runs after the local per-rank sorts (which happen in `__execute`) to gather the metadata every
@@ -165,6 +167,8 @@ _HSSSorter<_Tp, _Env, _BinaryOp>::__local_setup(
     __N,
     __comm_size};
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental::__detail::__hss_sort
 
 // NOLINTEND(bugprone-reserved-identifier)

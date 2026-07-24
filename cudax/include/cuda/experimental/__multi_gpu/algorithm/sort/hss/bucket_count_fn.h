@@ -65,7 +65,8 @@ struct __bucket_count_fn
   //! @param[in] __bucket The bucket index in `[0, __num_splitters]`.
   //!
   //! @return The count of keys in the half-open interval delimited by the surrounding splitters.
-  [[nodiscard]] _CCCL_DEVICE constexpr ::cuda::std::uint64_t operator()(::cuda::std::uint64_t __bucket) const noexcept
+  [[nodiscard]] _CCCL_DEVICE_API constexpr ::cuda::std::uint64_t
+  operator()(::cuda::std::uint64_t __bucket) const noexcept
   {
     auto __hi = __keys_last;
     // This reordering takes advantage of the fact that we cached __lo previously. In

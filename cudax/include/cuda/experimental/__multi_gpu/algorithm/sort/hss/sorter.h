@@ -40,13 +40,6 @@
 
 namespace cuda::experimental::__detail::__hss_sort
 {
-//! @brief Load-balance tolerance for the HSS sampling loop (2%).
-//!
-//! Bounds the acceptable deviation of each rank's final key count from the ideal `N/p`. It
-//! feeds the paper's sample-count schedule in `__histogramming_phase`: both the number of
-//! sampling rounds `K` and the per-round sample budget `s_j` scale with `1 / __eps`.
-inline constexpr double __eps = 0.02; // 2% tolerance
-
 template <class _Tp>
 struct _Bracket
 {
@@ -83,6 +76,8 @@ struct _LocalSetupResult
   ::cuda::std::int32_t __comm_size{};
 };
 
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
+
 template <class _Tp, class _Env, class _BinaryOp>
 class _HSSSorter
 {
@@ -118,6 +113,7 @@ private:
     _InputRange&& __input,
     const __buffer_type<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>>& __I_j,
     double __sampling_probability,
+    ::cuda::std::uint64_t __sample_seed,
     const _BinaryOp& __cmp,
     __buffer_type<_Tp>* __samples,
     __buffer_type<::cuda::std::size_t>* __sample_size);
@@ -194,6 +190,8 @@ public:
     _InputRange&& __local_inputs,
     _BinaryOp __cmp);
 };
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental::__detail::__hss_sort
 
 // NOLINTEND(bugprone-reserved-identifier)

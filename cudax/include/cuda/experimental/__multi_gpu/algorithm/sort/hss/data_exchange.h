@@ -67,7 +67,7 @@ struct __finalize_splitters_fn
   const _Tp* __first_probe;
   const _Tp* __last_probe;
 
-  [[nodiscard]] _CCCL_DEVICE constexpr _Tp
+  [[nodiscard]] _CCCL_DEVICE_API constexpr _Tp
   operator()(::cuda::std::uint64_t __target_rank, _Bracket<_Tp> __L_i, _Bracket<_Tp> __U_i) const noexcept
   {
     const bool __use_L = (__target_rank - __L_i.__rank) <= (__U_i.__rank - __target_rank);
@@ -83,6 +83,8 @@ struct __finalize_splitters_fn
     return __U_i.__key.has_value() ? *__U_i.__key : *__last_probe;
   }
 };
+
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
 
 //! @brief Route every rank's local keys to their destination ranks and merge the received runs.
 //!
@@ -151,6 +153,8 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
     // demand, eliminating one Transform launch and the splitter buffer. The ideal rank Ni/p
     // (the center of the Section 2 / Table 1 target range Ti) is supplied per-splitter by
     // __ideal_rank_fn.
+    _CCCL_VERIFY(!__probes.__get().empty(), "Histogramming phase should have generated at least one probe");
+
     auto __splitter_it = ::cuda::make_zip_transform_iterator(
       __finalize_splitters_fn<_Tp>{__probes.data(), ::cuda::std::to_address(__probes.end() - 1)},
       ::cuda::make_transform_iterator(
@@ -167,14 +171,18 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
     auto __op = __bucket_count_fn<::cuda::std::remove_cvref_t<decltype(__input_begin)>,
                                   ::cuda::std::remove_cvref_t<decltype(__splitter_it)>,
                                   _BinaryOp>{
-      __input_begin, ::cuda::std::to_address(::cuda::std::ranges::end(__input)), __splitter_it, __Ls.size(), __cmp};
+      __input_begin,
+      ::cuda::std::to_address(::cuda::std::ranges::end(__input)),
+      ::cuda::std::move(__splitter_it),
+      __Ls.size(),
+      __cmp};
 
     __CUDAX_MULTI_GPU_DISPATCH(
       __comm.logical_device(),
       CUB_NS_QUALIFIER::DeviceTransform::Transform,
       ::cuda::counting_iterator<::cuda::std::uint64_t>{},
       __send_counts.data(),
-      __comm_size,
+      __send_counts.size(),
       ::cuda::std::move(__op),
       __env);
   }
@@ -273,8 +281,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
     }
   }
 
-  // --- Phase C: merge the p received sorted runs into the final local output
-  // ---
+  // Merge the p received sorted runs into the final local output
   for (auto&& [__comm, __env, __recvd, __h_recv_counts, __h_recv_displs, __inputs] : ::cuda::std::ranges::views::zip(
          __comms, __envs, __local_recvd, __local_h_recv_counts, __local_h_recv_displs, __local_inputs))
   {
@@ -296,6 +303,8 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
                                  ::cuda::source_access_order::stream});
   }
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental::__detail::__hss_sort
 
 // NOLINTEND(bugprone-reserved-identifier)

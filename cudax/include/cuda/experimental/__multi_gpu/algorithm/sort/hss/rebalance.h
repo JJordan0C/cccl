@@ -62,7 +62,7 @@ struct __rebalance_counts_fn
   const ::cuda::std::uint64_t* __current_offsets;
   const ::cuda::std::uint64_t* __desired_offsets;
 
-  [[nodiscard]] _CCCL_DEVICE constexpr ::cuda::std::
+  [[nodiscard]] _CCCL_DEVICE_API constexpr ::cuda::std::
     tuple<::cuda::std::size_t, ::cuda::std::size_t, ::cuda::std::size_t, ::cuda::std::size_t>
     operator()(::cuda::std::uint64_t __peer) const noexcept
   {
@@ -99,6 +99,8 @@ struct __rebalance_counts_fn
       __recv_count == 0 ? ::cuda::std::size_t{0} : static_cast<::cuda::std::size_t>(__recv_begin - __my_dst_begin)};
   }
 };
+
+_CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
 
 //! @brief Redistribute the globally sorted keys back to each rank's original per-rank size.
 //!
@@ -329,6 +331,8 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__rebalance_to_original_co
                                  ::cuda::source_access_order::stream});
   }
 }
+
+_CCCL_END_NAMESPACE_ARCH_DEPENDENT
 } // namespace cuda::experimental::__detail::__hss_sort
 
 // NOLINTEND(bugprone-reserved-identifier)
