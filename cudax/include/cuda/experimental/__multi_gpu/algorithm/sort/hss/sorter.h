@@ -93,7 +93,6 @@ public:
   template <class _Up>
   using __buffer_type _CCCL_NODEBUG = ::cuda::experimental::__detail::__hss_sort::__buffer<_Up, __resource_type>;
 
-  using __bracket_type _CCCL_NODEBUG                   = _Bracket<_Tp>;
   using __per_comm_splitters_type _CCCL_NODEBUG        = _PerCommSplitters<__buffer_type, _Tp>;
   using __per_comm_sampling_scratch_type _CCCL_NODEBUG = _PerCommSamplingScratch<__buffer_type, _Tp>;
   using __local_setup_result_type _CCCL_NODEBUG        = _LocalSetupResult<__resource_type, __buffer_type>;
@@ -119,7 +118,7 @@ private:
     _InputRange&& __input,
     const __buffer_type<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>>& __I_j,
     double __sampling_probability,
-    _BinaryOp __cmp,
+    const _BinaryOp& __cmp,
     __buffer_type<_Tp>* __samples,
     __buffer_type<::cuda::std::size_t>* __sample_size);
 

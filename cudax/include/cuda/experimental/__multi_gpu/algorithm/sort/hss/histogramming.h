@@ -150,7 +150,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__sample_probes(
   _InputRange&& __input,
   const __buffer_type<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>>& __I_j,
   double __sampling_probability,
-  _BinaryOp __cmp,
+  const _BinaryOp& __cmp,
   __buffer_type<_Tp>* __samples,
   __buffer_type<::cuda::std::size_t>* __sample_size)
 {
@@ -169,7 +169,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__sample_probes(
     ::cuda::std::to_address(::cuda::std::ranges::begin(__input)),
     ::cuda::std::to_address(::cuda::std::ranges::end(__input)),
     __I_j.__get(),
-    ::cuda::std::move(__cmp),
+    __cmp,
     ::cuda::std::span<_Tp>{*__samples},
     __sample_size->__get().data());
 }
@@ -188,20 +188,17 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__sample_probes(
 //! matching probe keys.
 //!
 //! @tparam _Tp The key (value) type.
-//! @tparam _Bracket The `__bracket_type` (rank plus optional key) used for the `L` / `U` ends.
-template <class _Tp, class _Bracket>
+template <class _Tp>
 struct __update_intervals_fn
 {
   const _Tp* __probes_begin;
   const ::cuda::std::uint64_t* __hist_begin;
   ::cuda::std::size_t __num_probes;
 
-  template <class _Tup>
   [[nodiscard]] _CCCL_DEVICE constexpr ::cuda::std::
-    tuple<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>, _Bracket, _Bracket>
-    operator()(const _Tup& __tup) const noexcept
+    tuple<::cuda::std::pair<::cuda::std::optional<_Tp>, ::cuda::std::optional<_Tp>>, _Bracket<_Tp>, _Bracket<_Tp>>
+    operator()(::cuda::std::uint64_t __target, _Bracket<_Tp> __L_i, _Bracket<_Tp> __U_i) const noexcept
   {
-    auto [__target, __L_i, __U_i] = __tup;
     // global_rank = number of input keys strictly less than probes[j]
     //             = prefix sum of per-bucket counts up to bucket j.
     ::cuda::std::uint64_t __global_rank = 0;
@@ -213,19 +210,19 @@ struct __update_intervals_fn
       if (__global_rank == __target)
       {
         // Exact match, we have managed to find the perfect splitter value
-        __L_i = __U_i = _Bracket{__global_rank, __probes_begin[__j]};
+        __L_i = __U_i = _Bracket<_Tp>{__global_rank, __probes_begin[__j]};
         break;
       }
 
       if ((__global_rank < __target) && (__global_rank > __L_i.__rank))
       {
         // We undershot the target, so we can raise our lower bound
-        __L_i = _Bracket{__global_rank, __probes_begin[__j]};
+        __L_i = _Bracket<_Tp>{__global_rank, __probes_begin[__j]};
       }
       else if ((__global_rank > __target) && (__global_rank < __U_i.__rank))
       {
         // Overshot the target but can lower the upper bound
-        __U_i = _Bracket{__global_rank, __probes_begin[__j]};
+        __U_i = _Bracket<_Tp>{__global_rank, __probes_begin[__j]};
       }
     }
 
@@ -262,10 +259,10 @@ _HSSSorter<_Tp, _Env, _BinaryOp>::__allocate_histogramming_buffers(
     const auto __n_split = __comm_size - 1;
 
     __local_splitters.emplace_back(__per_comm_splitters_type{
-      /*__Ls=*/__buffer_type<__bracket_type>{
-        __stream, __resource, __n_split, __bracket_type{0, ::cuda::std::nullopt}, __env},
+      /*__Ls=*/__buffer_type<_Bracket<_Tp>>{
+        __stream, __resource, __n_split, _Bracket<_Tp>{0, ::cuda::std::nullopt}, __env},
       /*__Us=*/
-      __buffer_type<__bracket_type>{__stream, __resource, __n_split, __bracket_type{__N, ::cuda::std::nullopt}, __env},
+      __buffer_type<_Bracket<_Tp>>{__stream, __resource, __n_split, _Bracket<_Tp>{__N, ::cuda::std::nullopt}, __env},
       /*__probes=*/__buffer_type<_Tp>{__stream, __resource, __env}});
 
     {
@@ -521,19 +518,19 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__compute_histogram(
   for (auto&& [__comm, __env, __keys, __splitters, __scratch] :
        ::cuda::std::ranges::views::zip(__comms, __envs, __range_of_local_keys, __local_splitters, *__local_scratch))
   {
-    auto& __probes            = __splitters.__probes;
-    auto& __hist              = __scratch.__hist;
-    const auto __num_probes   = __probes.size();
-    const auto __num_buckets  = __num_probes + 1;
-    const auto __keys_first   = ::cuda::std::ranges::begin(__keys);
-    const auto __probes_first = __probes.begin();
+    auto& __probes             = __splitters.__probes;
+    auto& __hist               = __scratch.__hist;
+    const auto __num_probes    = __probes.size();
+    const auto __num_buckets   = __num_probes + 1;
+    const auto* __keys_first   = ::cuda::std::to_address(::cuda::std::ranges::begin(__keys));
+    const auto* __probes_first = __probes.data();
 
     ::cuda::experimental::__detail::__hss_sort::__resize_for_overwrite(__hist, __num_buckets);
 
-    auto __op =
-      __bucket_count_fn<::cuda::std::remove_cvref_t<decltype(__keys_first)>,
-                        ::cuda::std::remove_cvref_t<decltype(__probes_first)>,
-                        _BinaryOp>{__keys_first, ::cuda::std::ranges::end(__keys), __probes_first, __num_probes, __cmp};
+    auto __op = __bucket_count_fn<::cuda::std::remove_cvref_t<decltype(__keys_first)>,
+                                  ::cuda::std::remove_cvref_t<decltype(__probes_first)>,
+                                  _BinaryOp>{
+      __keys_first, ::cuda::std::to_address(::cuda::std::ranges::end(__keys)), __probes_first, __num_probes, __cmp};
 
     __CUDAX_MULTI_GPU_DISPATCH(
       __comm.logical_device(),
@@ -588,24 +585,20 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__update_intervals(
   for (auto&& [__comm, __env, __splitters, __scratch] :
        ::cuda::std::ranges::views::zip(__comms, __envs, *__local_splitters, *__local_scratch))
   {
-    auto& __probes             = __splitters.__probes;
-    auto& __histogram          = __scratch.__hist;
-    auto& __Ls                 = __splitters.__Ls;
-    auto& __Us                 = __splitters.__Us;
-    auto& __I_j                = __scratch.__I_j;
     const auto __comm_size     = __comm.size();
-    const auto __num_splitters = __I_j.size();
-    const auto __I_j_begin     = __I_j.begin();
-    const auto __Ls_begin      = __Ls.begin();
-    const auto __Us_begin      = __Us.begin();
+    const auto __num_splitters = __scratch.__I_j.size();
+    auto* const __I_j_begin    = __scratch.__I_j.data();
+    auto* const __Ls_begin     = __splitters.__Ls.data();
+    auto* const __Us_begin     = __splitters.__Us.data();
 
-    auto __in = ::cuda::make_zip_iterator(
+    auto __in = ::cuda::std::make_tuple(
       ::cuda::make_transform_iterator(
         ::cuda::counting_iterator<::cuda::std::uint64_t>{}, __ideal_rank_fn{__N, __comm_size}),
       __Ls_begin,
       __Us_begin);
-    auto __out = ::cuda::make_zip_iterator(__I_j_begin, __Ls_begin, __Us_begin);
-    auto __op  = __update_intervals_fn<_Tp, __bracket_type>{__probes.data(), __histogram.data(), __probes.size()};
+    auto __out = ::cuda::std::make_tuple(__I_j_begin, __Ls_begin, __Us_begin);
+    auto __op =
+      __update_intervals_fn<_Tp>{__splitters.__probes.data(), __scratch.__hist.data(), __splitters.__probes.size()};
 
     __CUDAX_MULTI_GPU_DISPATCH(
       __comm.logical_device(),

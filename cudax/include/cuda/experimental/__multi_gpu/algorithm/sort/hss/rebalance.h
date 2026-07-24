@@ -27,7 +27,6 @@
 
 #include <cuda/__algorithm/copy.h>
 #include <cuda/__iterator/counting_iterator.h>
-#include <cuda/__iterator/zip_iterator.h>
 #include <cuda/__stream/get_stream.h>
 #include <cuda/std/__algorithm/max.h>
 #include <cuda/std/__algorithm/min.h>
@@ -230,7 +229,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__rebalance_to_original_co
       ::cuda::no_init,
       ::cuda::experimental::__detail::__sanitize_buffer_env(__env));
 
-    auto __out = ::cuda::make_zip_iterator(
+    auto __out = ::cuda::std::make_tuple(
       __send_counts.begin(), __send_displs.begin(), __recv_counts.begin(), __recv_displs.begin());
 
     auto __op = __rebalance_counts_fn{

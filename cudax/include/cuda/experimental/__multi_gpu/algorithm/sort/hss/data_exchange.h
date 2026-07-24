@@ -27,7 +27,7 @@
 #include <cuda/__algorithm/copy.h>
 #include <cuda/__iterator/counting_iterator.h>
 #include <cuda/__iterator/transform_iterator.h>
-#include <cuda/__iterator/zip_iterator.h>
+#include <cuda/__iterator/zip_transform_iterator.h>
 #include <cuda/std/__iterator/back_insert_iterator.h>
 #include <cuda/std/__numeric/exclusive_scan.h>
 #include <cuda/std/__ranges/zip_view.h>
@@ -67,11 +67,10 @@ struct __finalize_splitters_fn
   const _Tp* __first_probe;
   const _Tp* __last_probe;
 
-  template <class _Tup>
-  [[nodiscard]] _CCCL_DEVICE constexpr _Tp operator()(const _Tup& __tup) const noexcept
+  [[nodiscard]] _CCCL_DEVICE constexpr _Tp
+  operator()(::cuda::std::uint64_t __target_rank, _Bracket<_Tp> __L_i, _Bracket<_Tp> __U_i) const noexcept
   {
-    const auto [__target_rank, __L_i, __U_i] = __tup;
-    const bool __use_L                       = (__target_rank - __L_i.__rank) <= (__U_i.__rank - __target_rank);
+    const bool __use_L = (__target_rank - __L_i.__rank) <= (__U_i.__rank - __target_rank);
 
     // Note that L_i and U_i might not have values if we never found any global splitters among
     // our values. In this case the "closest" is simply our extrema.
@@ -142,7 +141,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
     auto& __send_counts =
       __local_send_counts.emplace_back(__Ls.__get().stream(), __resource, __comm_size, ::cuda::no_init, __env);
 
-    const auto __input_begin = ::cuda::std::ranges::begin(__input);
+    const auto __input_begin = ::cuda::std::to_address(::cuda::std::ranges::begin(__input));
 
     // Lazily reconstruct the finalized splitters (HSS Section 4.2.2 step (5), "the key
     // ranked closest to Ni/p ... is set as the ith splitter") on the fly instead of
@@ -152,14 +151,12 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
     // demand, eliminating one Transform launch and the splitter buffer. The ideal rank Ni/p
     // (the center of the Section 2 / Table 1 target range Ti) is supplied per-splitter by
     // __ideal_rank_fn.
-    auto __splitter_it = ::cuda::make_transform_iterator(
-      ::cuda::make_zip_iterator(
-        ::cuda::make_transform_iterator(
-          ::cuda::counting_iterator<::cuda::std::uint64_t>{}, __ideal_rank_fn{__N, __comm_size}),
-        __Ls.begin(),
-        __Us.begin()),
-      __finalize_splitters_fn<_Tp>{
-        ::cuda::std::to_address(__probes.data()), ::cuda::std::to_address(__probes.end() - 1)});
+    auto __splitter_it = ::cuda::make_zip_transform_iterator(
+      __finalize_splitters_fn<_Tp>{__probes.data(), ::cuda::std::to_address(__probes.end() - 1)},
+      ::cuda::make_transform_iterator(
+        ::cuda::counting_iterator<::cuda::std::uint64_t>{}, __ideal_rank_fn{__N, __comm_size}),
+      __Ls.data(),
+      __Us.data());
 
     // Route this rank's local keys to destination ranks via the splitter keys: the Data
     // Exchange phase, HSS Section 3.1 step (3), "a key in range [S(i), S(i + 1)) goes to
@@ -167,16 +164,16 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__data_exchange(
     // in [S(d - 1), S(d)) and its count becomes the send metadata. The send displacements are the
     // exclusive prefix-sum of these counts (buckets are contiguous and non-overlapping), so we
     // recompute them on the host below instead of emitting a second device column here.
-    auto __op = ::cuda::experimental::__detail::__hss_sort::__bucket_count_fn<
-      ::cuda::std::remove_cvref_t<decltype(__input_begin)>,
-      ::cuda::std::remove_cvref_t<decltype(__splitter_it)>,
-      _BinaryOp>{__input_begin, ::cuda::std::ranges::end(__input), __splitter_it, __Ls.size(), __cmp};
+    auto __op = __bucket_count_fn<::cuda::std::remove_cvref_t<decltype(__input_begin)>,
+                                  ::cuda::std::remove_cvref_t<decltype(__splitter_it)>,
+                                  _BinaryOp>{
+      __input_begin, ::cuda::std::to_address(::cuda::std::ranges::end(__input)), __splitter_it, __Ls.size(), __cmp};
 
     __CUDAX_MULTI_GPU_DISPATCH(
       __comm.logical_device(),
       CUB_NS_QUALIFIER::DeviceTransform::Transform,
       ::cuda::counting_iterator<::cuda::std::uint64_t>{},
-      __send_counts.begin(),
+      __send_counts.data(),
       __comm_size,
       ::cuda::std::move(__op),
       __env);

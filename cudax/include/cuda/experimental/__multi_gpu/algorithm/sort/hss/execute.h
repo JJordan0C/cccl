@@ -93,7 +93,7 @@ _CCCL_HOST_API void _HSSSorter<_Tp, _Env, _BinaryOp>::__execute(
     __CUDAX_MULTI_GPU_DISPATCH(
       __comm.logical_device(),
       CUB_NS_QUALIFIER::DeviceMergeSort::SortKeys,
-      ::cuda::std::ranges::begin(__input),
+      ::cuda::std::to_address(::cuda::std::ranges::begin(__input)),
       ::cuda::std::ranges::size(__input),
       __cmp,
       __env);

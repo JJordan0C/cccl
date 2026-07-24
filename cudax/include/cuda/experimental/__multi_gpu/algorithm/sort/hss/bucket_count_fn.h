@@ -43,9 +43,10 @@ namespace cuda::experimental::__detail::__hss_sort
 //! CUB invokes the operator with a monotonically increasing bucket index over a fixed stride,
 //! so the previous call's upper bound is a valid lower bound for the next bucket. The functor
 //! caches that upper bound in the `mutable` `__lo` cursor and searches forward from it via
-//! `cuda::std::lower_bound`, turning the per-bucket scan into two bounded binary searches. The
-//! operator is therefore declared `const` yet mutates `__lo`, which is correct only under CUB's
-//! monotonic left-to-right invocation contract; any other call order would corrupt the cursor.
+//! `cuda::std::lower_bound`, turning the per-bucket scan into two bounded binary searches.
+//!
+//! This is correct only under CUB's monotonic left-to-right invocation contract; any other
+//! call order would corrupt the cursor.
 //!
 //! @tparam _KeyIt The iterator type over the sorted key range.
 //! @tparam _SearchIt The iterator type over the values to search for in the key range.
@@ -77,7 +78,7 @@ struct __bucket_count_fn
       __hi = ::cuda::std::lower_bound(__lo, __keys_last, __search_it[__bucket], __cmp);
     }
 
-    if (__bucket != 0)
+    if (__bucket > 0)
     {
       __lo = ::cuda::std::lower_bound(__lo, __hi, __search_it[__bucket - 1], __cmp);
     }
