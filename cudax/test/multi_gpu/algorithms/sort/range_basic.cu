@@ -8,7 +8,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <cuda/buffer>
+#include <cuda/memory_resource>
 #include <cuda/std/algorithm>
+#include <cuda/std/array>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/functional>
@@ -80,6 +83,50 @@ void check_sort_case_sections(cuda::std::span<cudax::nccl_communicator_ref> comm
   }
 }
 } // namespace
+
+MULTI_GPU_TEST("sort documentation example", c2h::type_list<int>)
+{
+  auto comms = this->communicators();
+
+  if (comms.size() < 2)
+  {
+    SKIP("The sort documentation example requires at least two local GPUs");
+  }
+
+  auto streams_owned = nccl_test_util::make_streams();
+  // Convert to stream_ref directly, cuda::stream on their own cant be passed directly to CUB
+  auto streams = std::vector<cuda::stream_ref>{streams_owned.begin(), streams_owned.end()};
+
+  //! [sort]
+  // Rank 0 holds {3, 1} and rank 1 holds {4, 2}, so the global sequence is {3, 1, 4, 2}.
+  constexpr cuda::std::array rank_0_values{3, 1};
+  constexpr cuda::std::array rank_1_values{4, 2};
+
+  std::vector<cuda::device_buffer<int>> inputs;
+
+  inputs.emplace_back(
+    cuda::make_device_buffer<int>(streams[0], comms[0].logical_device().underlying_device(), rank_0_values));
+  inputs.emplace_back(
+    cuda::make_device_buffer<int>(streams[1], comms[1].logical_device().underlying_device(), rank_1_values));
+
+  cudax::sort(cudax::distributed,
+              comms,
+              // Passing streams as the environment directly
+              streams,
+              inputs);
+
+  // The sort is in place and each rank keeps its original element count, so the globally sorted
+  // sequence {1, 2, 3, 4} is split back into two elements per rank, in ascending rank order.
+  constexpr cuda::std::array expected_rank_0{1, 2};
+  constexpr cuda::std::array expected_rank_1{3, 4};
+  const auto expected_0 =
+    cuda::make_buffer<int>(inputs[0].stream(), cuda::mr::legacy_pinned_memory_resource{}, expected_rank_0);
+  const auto expected_1 =
+    cuda::make_buffer<int>(inputs[1].stream(), cuda::mr::legacy_pinned_memory_resource{}, expected_rank_1);
+  REQUIRE_THAT(inputs[0], Equals(expected_0));
+  REQUIRE_THAT(inputs[1], Equals(expected_1));
+  //! [sort]
+}
 
 MULTI_GPU_TEST("sort, random inputs", sort_types)
 {
