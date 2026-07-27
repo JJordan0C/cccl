@@ -9,6 +9,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <cuda/__container/resizable_buffer.h>
+#include <cuda/algorithm>
 #include <cuda/buffer>
 #include <cuda/devices>
 #include <cuda/memory_pool>
@@ -20,8 +21,7 @@
 #include <cuda/std/utility>
 
 #include <stdexcept>
-
-#include <cuda_runtime_api.h>
+#include <vector>
 
 #include "helper.h"
 
@@ -33,10 +33,8 @@ void check_prefix(const buffer_t& buf, const cuda::std::array<int, _Size>& expec
 {
   REQUIRE(buf.size() >= _Size);
 
-  cuda::std::array<int, _Size> actual{};
-  cuda::__ensure_current_context guard{buf.stream()};
-  REQUIRE(::cudaMemcpyAsync(actual.data(), buf.data(), _Size * sizeof(int), cudaMemcpyDeviceToHost, buf.stream().get())
-          == cudaSuccess);
+  std::vector<int> actual(_Size);
+  cuda::copy_bytes(buf.stream(), buf.first(_Size), actual);
   buf.stream().sync();
 
   for (cuda::std::size_t i = 0; i != _Size; ++i)
