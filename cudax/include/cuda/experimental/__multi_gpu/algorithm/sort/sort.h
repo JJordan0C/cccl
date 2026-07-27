@@ -24,10 +24,12 @@
 
 #include <cuda/__nvtx/nvtx.h>
 #include <cuda/std/__functional/operations.h>
+#include <cuda/std/__memory/addressof.h>
 #include <cuda/std/__ranges/concepts.h>
 #include <cuda/std/__ranges/size.h>
 #include <cuda/std/__type_traits/is_callable.h>
 #include <cuda/std/__utility/move.h>
+#include <cuda/std/span>
 
 #include <cuda/experimental/__multi_gpu/algorithm/common.h>
 #include <cuda/experimental/__multi_gpu/algorithm/sort/hss/execute.h>
@@ -75,6 +77,22 @@ void sort(const __result_policy_base<_Policy>& __policy,
     ::cuda::std::forward<_CommRange>(__comms),
     ::cuda::std::forward<_EnvRange>(__envs),
     ::cuda::std::forward<_InputRange>(__range_of_input_ranges),
+    ::cuda::std::move(__cmp));
+}
+
+_CCCL_TEMPLATE(class _Policy, class _Comm, class _Env, class _InputRange, class _BinaryOp = ::cuda::std::less<>)
+_CCCL_REQUIRES(__communicator<_Comm> _CCCL_AND ::cuda::std::ranges::random_access_range<_InputRange>)
+void sort(const __result_policy_base<_Policy>& __policy,
+          _Comm&& __comm,
+          _Env&& __env,
+          _InputRange&& __input,
+          _BinaryOp __cmp = {})
+{
+  ::cuda::experimental::sort(
+    __policy,
+    ::cuda::std::span<::cuda::std::remove_reference_t<_Comm>, 1>{::cuda::std::addressof(__comm), 1},
+    ::cuda::std::span<::cuda::std::remove_reference_t<_Env>, 1>{::cuda::std::addressof(__env), 1},
+    ::cuda::std::span<::cuda::std::remove_reference_t<_InputRange>, 1>{::cuda::std::addressof(__input), 1},
     ::cuda::std::move(__cmp));
 }
 

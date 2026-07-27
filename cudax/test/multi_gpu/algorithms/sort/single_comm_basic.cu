@@ -16,8 +16,11 @@
 
 #include <cuda/experimental/__multi_gpu/algorithm/sort/sort.h>
 
+#include <exception>
+#include <future>
 #include <vector>
 
+#include <algorithm_common.h>
 #include <nccl_test_common.h>
 #include <testing.cuh>
 
@@ -31,9 +34,11 @@ using sort_test_util::abs_less;
 using sort_test_util::make_value;
 using sort_test_util::sort_types;
 
-// Run the whole world's sort through the range overload and check the result against a host-side
-// `cuda::std::sort` of the same elements. Every test in this file differs only in how the inputs
-// are shaped, so all of them funnel through here.
+// Drive the sort through the single-communicator overload, one thread per local rank. That
+// overload opens its own NCCL group on a single communicator, so issuing the per-rank calls
+// serially on one thread would deadlock at `ncclGroupEnd`. Only the `sort` call happens on the
+// worker threads; every Catch2 assertion runs on the main thread after the join, since the
+// assertion macros are not safe to fire concurrently.
 template <class T, class Compare>
 void check_sort_case(
   cuda::std::span<cudax::nccl_communicator_ref> comms, const std::vector<c2h::host_vector<T>>& host_inputs, Compare cmp)
@@ -45,7 +50,9 @@ void check_sort_case(
   auto environments   = std::vector<cuda::stream_ref>{streams.begin(), streams.end()};
   auto device_vec     = sort_test_util::make_device_inputs(comms, host_inputs);
 
-  cudax::sort(cudax::distributed, comms, environments, device_vec, cmp);
+  run_threaded(comms.size(), [&](cuda::std::size_t i) {
+    cudax::sort(cudax::distributed, comms[i], environments[i], device_vec[i], cmp);
+  });
 
   // Since we are using c2h vectors instead of cuda buffers (which remember what stream they
   // are on), we need to sync here before doing the checks because the internal copy stream
@@ -63,8 +70,6 @@ void check_sort_case(
   REQUIRE_THAT(output, Equals(expected));
 }
 
-// Every input shape is worth exercising under both orderings: an ascending-only test would not
-// catch a comparator that is applied with its arguments swapped somewhere in the pipeline.
 template <class T>
 void check_sort_case_sections(cuda::std::span<cudax::nccl_communicator_ref> comms,
                               const std::vector<c2h::host_vector<T>>& host_inputs)
@@ -81,7 +86,7 @@ void check_sort_case_sections(cuda::std::span<cudax::nccl_communicator_ref> comm
 }
 } // namespace
 
-MULTI_GPU_TEST("sort, random inputs", sort_types)
+MULTI_GPU_TEST("sort single-comm, random inputs", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -97,7 +102,7 @@ MULTI_GPU_TEST("sort, random inputs", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, uneven rank sizes", sort_types)
+MULTI_GPU_TEST("sort single-comm, uneven rank sizes", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -113,7 +118,7 @@ MULTI_GPU_TEST("sort, uneven rank sizes", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, inputs with some empty ranks", sort_types)
+MULTI_GPU_TEST("sort single-comm, inputs with some empty ranks", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -129,17 +134,7 @@ MULTI_GPU_TEST("sort, inputs with some empty ranks", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, no communicators", sort_types)
-{
-  using T = typename c2h::get<0, TestType>;
-
-  const auto comms = cuda::std::span<cudax::nccl_communicator_ref>{};
-  std::vector<c2h::host_vector<T>> input(comms.size());
-
-  check_sort_case_sections(comms, input);
-}
-
-MULTI_GPU_TEST("sort, all ranks empty", sort_types)
+MULTI_GPU_TEST("sort single-comm, all ranks empty", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -149,7 +144,7 @@ MULTI_GPU_TEST("sort, all ranks empty", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, a single global item", sort_types)
+MULTI_GPU_TEST("sort single-comm, a single global item", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -164,7 +159,7 @@ MULTI_GPU_TEST("sort, a single global item", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, one item per rank", sort_types)
+MULTI_GPU_TEST("sort single-comm, one item per rank", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -180,7 +175,7 @@ MULTI_GPU_TEST("sort, one item per rank", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, all equal inputs", sort_types)
+MULTI_GPU_TEST("sort single-comm, all equal inputs", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -195,7 +190,7 @@ MULTI_GPU_TEST("sort, all equal inputs", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, inputs with many equal keys", sort_types)
+MULTI_GPU_TEST("sort single-comm, inputs with many equal keys", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -217,7 +212,7 @@ MULTI_GPU_TEST("sort, inputs with many equal keys", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, presorted inputs", sort_types)
+MULTI_GPU_TEST("sort single-comm, presorted inputs", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -239,7 +234,7 @@ MULTI_GPU_TEST("sort, presorted inputs", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, reverse-sorted inputs", sort_types)
+MULTI_GPU_TEST("sort single-comm, reverse-sorted inputs", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -261,7 +256,7 @@ MULTI_GPU_TEST("sort, reverse-sorted inputs", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, skewed rank sizes", sort_types)
+MULTI_GPU_TEST("sort single-comm, skewed rank sizes", sort_types)
 {
   using T = typename c2h::get<0, TestType>;
 
@@ -277,7 +272,7 @@ MULTI_GPU_TEST("sort, skewed rank sizes", sort_types)
   check_sort_case_sections(comms, input);
 }
 
-MULTI_GPU_TEST("sort, nonstandard comparator", )
+MULTI_GPU_TEST("sort single-comm, nonstandard comparator", )
 {
   auto comms = this->communicators();
   std::vector<c2h::host_vector<int>> input(comms.size());
