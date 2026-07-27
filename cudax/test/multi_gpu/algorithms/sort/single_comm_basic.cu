@@ -8,10 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <cuda/buffer>
-#include <cuda/memory_resource>
 #include <cuda/std/algorithm>
-#include <cuda/std/array>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/functional>
@@ -109,32 +106,33 @@ MULTI_GPU_TEST("sort single-comm documentation example", c2h::type_list<int>)
   run_threaded(comms.size(), [&](cuda::std::size_t i) {
     auto& communicator = comms[i];
     auto environment   = streams[i];
-    const auto device  = communicator.logical_device().underlying_device();
+
+    REQUIRE_CUDART(cudaSetDevice(communicator.logical_device().underlying_device().get()));
 
     //! [sort_single_range]
     // Rank r contributes the descending pair {2 * (size - r), 2 * (size - r) - 1}, so the ranks
-    // together hold the values 1 through 2 * size in reverse rank order.
-    const auto rank      = communicator.rank();
-    const auto comm_size = communicator.size();
-    const auto high      = 2 * (comm_size - rank);
-    const cuda::std::array input_values{high, high - 1};
+    // together hold the values 1 through 2 * size in reverse rank order. The input range must be
+    // resizable, since the sort re-partitions the keys across the ranks before restoring the
+    // original per-rank sizes.
+    const auto rank = communicator.rank();
+    const auto high = 2 * (communicator.size() - rank);
 
-    auto input = cuda::make_device_buffer<int>(environment, device, input_values);
+    c2h::device_vector<int> input{high, high - 1};
 
     cudax::sort(cudax::distributed, communicator, environment, input);
 
     // The sort is in place and each rank keeps its original element count, so rank r ends up with
     // its two-element slice of the globally sorted sequence.
-    const auto expected =
-      cuda::make_buffer<int>(input.stream(), cuda::mr::legacy_pinned_memory_resource{}, {2 * rank + 1, 2 * rank + 2});
-
+    const c2h::device_vector<int> expected{2 * rank + 1, 2 * rank + 2};
     //! [sort_single_range]
+
+    environment.sync();
 
     // catch2 isn't thread safe by default, so we can't use the usual requires expression. So
     // we roll a hacky version of it ourselves
-    if (const auto matcher = Equals(expected); !matcher.match(input))
+    if (input != expected)
     {
-      failed[rank] = matcher.describe();
+      failed[rank] = "rank slice does not match the expected sorted values";
     }
   });
 

@@ -71,8 +71,13 @@ _CCCL_BEGIN_NAMESPACE_ARCH_DEPENDENT
 //! All three outer ranges must have the same length. The algorithm caps lockstep iteration at
 //! the shortest range, but this must not be relied upon and may change at any time. Each input
 //! range must refer to writable device-accessible storage, and its iterators must be
-//! contiguous, since the ranges are handed to the communicator collectives directly. Passing an
-//! empty range of communicators is well defined and does nothing.
+//! contiguous, since the ranges are handed to the communicator collectives directly. The input
+//! ranges must also be resizable, because a rank temporarily holds a different number of keys
+//! while they are re-partitioned. A no-init overload, `resize(size, cuda::no_init)` or
+//! `resize(size, thrust::no_init)`, is used when available and plain `resize(size)` otherwise,
+//! so a resizable device container such as `thrust::device_vector` qualifies while a fixed-size
+//! `cuda::device_buffer` does not. Passing an empty range of communicators is well defined and
+//! does nothing.
 //!
 //! Every communicator rank must participate in the collective call, including ranks whose input
 //! range is empty. `__cmp` must describe the same strict weak ordering on every rank.
@@ -153,7 +158,8 @@ void sort(const __result_policy_base<_Policy>& __policy,
 //! issuing them serially on one thread deadlocks. Prefer the range overload in that case.
 //!
 //! `__input` must refer to writable device-accessible storage and its iterators must be
-//! contiguous, since the range is handed to the communicator collectives directly.
+//! contiguous, since the range is handed to the communicator collectives directly. It must also
+//! be resizable, as described in the range overload.
 //!
 //! The environment supplies the stream and optional memory resource for the local rank, and is
 //! also forwarded to the underlying CUB algorithms. The results are ready once the work

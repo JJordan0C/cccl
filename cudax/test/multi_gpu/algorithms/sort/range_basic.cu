@@ -8,10 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <cuda/buffer>
-#include <cuda/memory_resource>
 #include <cuda/std/algorithm>
-#include <cuda/std/array>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/functional>
@@ -98,16 +95,16 @@ MULTI_GPU_TEST("sort documentation example", c2h::type_list<int>)
   auto streams = std::vector<cuda::stream_ref>{streams_owned.begin(), streams_owned.end()};
 
   //! [sort]
-  // Rank 0 holds {3, 1} and rank 1 holds {4, 2}, so the global sequence is {3, 1, 4, 2}.
-  constexpr cuda::std::array rank_0_values{3, 1};
-  constexpr cuda::std::array rank_1_values{4, 2};
+  // Rank 0 holds {3, 1} and rank 1 holds {4, 2}, so the global sequence is {3, 1, 4, 2}. Each
+  // input range must be resizable, since the sort re-partitions the keys across the ranks before
+  // restoring the original per-rank sizes.
+  std::vector<c2h::device_vector<int>> inputs;
 
-  std::vector<cuda::device_buffer<int>> inputs;
-
-  inputs.emplace_back(
-    cuda::make_device_buffer<int>(streams[0], comms[0].logical_device().underlying_device(), rank_0_values));
-  inputs.emplace_back(
-    cuda::make_device_buffer<int>(streams[1], comms[1].logical_device().underlying_device(), rank_1_values));
+  for (cuda::std::size_t i = 0; i < comms.size(); ++i)
+  {
+    REQUIRE_CUDART(cudaSetDevice(comms[i].logical_device().underlying_device().get()));
+    inputs.emplace_back(i == 0 ? c2h::device_vector<int>{3, 1} : c2h::device_vector<int>{4, 2});
+  }
 
   cudax::sort(cudax::distributed,
               comms,
@@ -117,15 +114,17 @@ MULTI_GPU_TEST("sort documentation example", c2h::type_list<int>)
 
   // The sort is in place and each rank keeps its original element count, so the globally sorted
   // sequence {1, 2, 3, 4} is split back into two elements per rank, in ascending rank order.
-  constexpr cuda::std::array expected_rank_0{1, 2};
-  constexpr cuda::std::array expected_rank_1{3, 4};
-  const auto expected_0 =
-    cuda::make_buffer<int>(inputs[0].stream(), cuda::mr::legacy_pinned_memory_resource{}, expected_rank_0);
-  const auto expected_1 =
-    cuda::make_buffer<int>(inputs[1].stream(), cuda::mr::legacy_pinned_memory_resource{}, expected_rank_1);
-  REQUIRE_THAT(inputs[0], Equals(expected_0));
-  REQUIRE_THAT(inputs[1], Equals(expected_1));
+  const c2h::device_vector<int> expected_rank_0{1, 2};
+  const c2h::device_vector<int> expected_rank_1{3, 4};
   //! [sort]
+
+  for (auto& stream : streams)
+  {
+    stream.sync();
+  }
+
+  REQUIRE(inputs[0] == expected_rank_0);
+  REQUIRE(inputs[1] == expected_rank_1);
 }
 
 MULTI_GPU_TEST("sort, random inputs", sort_types)
