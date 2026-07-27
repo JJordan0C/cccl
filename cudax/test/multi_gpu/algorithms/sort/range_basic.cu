@@ -8,6 +8,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <thrust/device_vector.h>
+
 #include <cuda/std/algorithm>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
@@ -98,12 +100,12 @@ MULTI_GPU_TEST("sort documentation example", c2h::type_list<int>)
   // Rank 0 holds {3, 1} and rank 1 holds {4, 2}, so the global sequence is {3, 1, 4, 2}. Each
   // input range must be resizable, since the sort re-partitions the keys across the ranks before
   // restoring the original per-rank sizes.
-  std::vector<c2h::device_vector<int>> inputs;
+  std::vector<thrust::device_vector<int>> inputs;
 
   for (cuda::std::size_t i = 0; i < comms.size(); ++i)
   {
     REQUIRE_CUDART(cudaSetDevice(comms[i].logical_device().underlying_device().get()));
-    inputs.emplace_back(i == 0 ? c2h::device_vector<int>{3, 1} : c2h::device_vector<int>{4, 2});
+    inputs.emplace_back(i == 0 ? thrust::device_vector<int>{3, 1} : thrust::device_vector<int>{4, 2});
   }
 
   cudax::sort(cudax::distributed,
@@ -114,8 +116,8 @@ MULTI_GPU_TEST("sort documentation example", c2h::type_list<int>)
 
   // The sort is in place and each rank keeps its original element count, so the globally sorted
   // sequence {1, 2, 3, 4} is split back into two elements per rank, in ascending rank order.
-  const c2h::device_vector<int> expected_rank_0{1, 2};
-  const c2h::device_vector<int> expected_rank_1{3, 4};
+  const thrust::device_vector<int> expected_rank_0{1, 2};
+  const thrust::device_vector<int> expected_rank_1{3, 4};
   //! [sort]
 
   for (auto& stream : streams)
